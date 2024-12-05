@@ -354,7 +354,28 @@ GROUP BY 1
 if the customer has done more than 5 return categorize them as returning otherwise new
 Challenge: List customers id, name, total orders, total returns
 */
-
+SELECT
+full_name as customers,
+total_orders,
+total_return,
+CASE
+	WHEN total_return > 5 THEN 'Returning Customer' ELSE 'New'
+END as cx_category
+FROM
+(
+SELECT
+CONCAT(c.first_name, ' ', c.last_name) as full_name,
+COUNT(o.order_id) as total_orders,
+SUM(CASE WHEN o.order_status = 'Returned' THEN 1 ELSE 0 END) as total_return
+FROM orders as o
+JOIN
+customers as c
+on c.customer_id = o.customer_id
+JOIN
+order_items as oi
+ON oi.order_id = o.order_id
+group by 1
+)
 
 /*
 17. Cross-Sell Opportunities
@@ -368,8 +389,27 @@ Challenge: Suggest cross-sell opportunities by displaying matching product categ
 Identify the top 5 customers with the highest number of orders for each state.
 Challenge: Include the number of orders and total sales for each customer.
 */
-
-
+SELECT *
+from
+(
+SELECT
+	c.state,
+	CONCAT(c.first_name, ' ', c.last_name) as fullname,
+	COUNT(o.order_id) as total_orders,
+	SUM(total_sales) as total_sales,
+	DENSE_RANK() OVER (PARTITION BY c.state ORDER BY COUNT(o.order_id) DESC) as rank
+FROM orders as o
+JOIN 
+order_items as oi
+ON oi.order_id = o.order_id
+JOIN 
+customers as c
+ON
+c.customer_id = o.customer_id
+group by 1, 2
+order by 1
+) as t1
+where  rank <= 5
 
 /*
 19. Revenue by Shipping Provider
@@ -377,13 +417,18 @@ Calculate the total revenue handled by each shipping provider.
 Challenge: Include the total number of orders handled and the average delivery time for each provider.
 */
 
-
-/*
-20. Top 10 product with highest decreasing revenue ratio compare to last year(2022) and current_year(2023)
-Challenge: Return product_id, product_name, category_name, 2022 revenue and 2023 revenue decrease ratio at end Round the result
-
-Note: Decrease ratio = cr-ls/ls* 100 (cs = current_year ls=last_year)
-*/
+SELECT
+s.shipping_providers,
+COUNT(o.order_id),
+SUM(oi.total_sales),
+COALESCE(AVG(s.return_date - s.shipping_date), 0) as avg_days
+from orders as o
+join
+order_items as oi
+on oi.order_id = o.order_id
+join shippings as s
+on s.order_id = o.order_id
+group by 1
 
 
 /*
@@ -392,10 +437,81 @@ Final Task
 create a function as soon as the product is sold the the same quantity should reduced from inventory table
 after adding any sales records it should update the stock in the inventory table based on the product and qty purchased
 -- 
+*/
+SELECT * FROM inventory
+SELECT * FROM order_items
+SELECT * FROM orders
+
+CREATE OR REPLACE PROCEDURE add_sales
+(
+p_order_id INT,
+p_customer_id INT,
+p_seller_id INT,
+p_order_item_id INT,
+p_product_id INT,
+p_quantity INT
+)
+LANGUAGE plpgsql
+AS $$
+
+DECLARE 
+-- all variable
+v_count INT;
+v_price FLOAT;
+v_product VARCHAR(50);
+
+BEGIN
+-- Fetching product name and price based p id entered
+	SELECT 
+		price, product_name
+		INTO
+		v_price, v_product
+	FROM products
+	WHERE product_id = p_product_id;
+	
+-- checking stock and product availability in inventory	
+	SELECT 
+		COUNT(*) 
+		INTO
+		v_count
+	FROM inventory
+	WHERE 
+		product_id = p_product_id
+		AND 
+		stock >= p_quantity;
+		
+	IF v_count > 0 THEN
+	-- add into orders and order_items table
+	-- update inventory
+		INSERT INTO orders(order_id, order_date, customer_id, seller_id)
+		VALUES
+		(p_order_id, CURRENT_DATE, p_customer_id, p_seller_id);
+
+		-- adding into order list
+		INSERT INTO order_items(order_item_id, order_id, product_id, quantity, price_per_unit, total_sales)
+		VALUES
+		(p_order_item_id, p_order_id, p_product_id, p_quantity, v_price, v_price*p_quantity);
+
+		--updating inventory
+		UPDATE inventory
+		SET stock = stock - p_quantity
+		WHERE product_id = p_product_id;
+		
+		RAISE NOTICE 'Thank you product: % sale has been added also inventory stock updates',v_product; 
+
+	ELSE
+		RAISE NOTICE 'Thank you for for your info the product: % is not available', v_product;
+
+	END IF;
 
 
+END;
+$$
 
-
+call add_sales
+(
+25005, 2, 5, 25004, 1, 14
+);
 
 
 
