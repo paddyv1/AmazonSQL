@@ -105,8 +105,6 @@ WHERE order_date >= CURRENT_DATE - INTERVAL '1 year'
 GROUP BY 1,2
 ORDER BY 2,1 asc
 
-
-
 /*
 5. Customers with No Purchases
 Find customers who have registered but never placed an order.
@@ -115,7 +113,6 @@ Challenge: List customer details and the time since their registration.
 SELECT * FROM customers
 WHERE customer_id NOT IN (SELECT
 				DISTINCT customer_id FROM orders);
-
 
 
 SELECT *
@@ -182,12 +179,6 @@ oi.order_id = o.order_id
 GROUP BY 1,2
 ORDER BY 3 DESC
 
-
-
-
-
-
-
 /*
 8. Inventory Stock Alerts
 Query products with stock levels below a certain threshold (e.g., less than 10 units).
@@ -205,10 +196,6 @@ products as p
 ON i.product_id = p.product_id
 WHERE i.stock <= 10
 ORDER BY 2 DESC
-
-
-
-
 
 
 /*
@@ -232,10 +219,6 @@ shippings as s
 on o.order_id = s.order_id
 WHERE s.shipping_date - o.order_date > 3
 
-
-
-
-
 /*
 10. Payment Success Rate 
 Calculate the percentage of successful payments across all orders.
@@ -252,8 +235,6 @@ payments as p
 on o.order_id = p.order_id
 group by 1
 
-
-
 /*
 11. Top Performing Sellers
 Find the top 5 sellers based on total sales value.
@@ -261,12 +242,60 @@ Challenge: Include both successful and failed orders, and display their percenta
 */
 
 
+WITH top_sellers
+AS(
+SELECT 
+	s.seller_id,
+	s.seller_name,
+	SUM(oi.total_sales) as total_sale
+FROM orders as o
+JOIN
+sellers as s
+ON o.seller_id = s.seller_id
+JOIN 
+order_items as oi
+ON oi.order_id = o.order_id
+GROUP BY 1,2
+ORDER BY 3 DESC),
+
+
+sellers_reports
+AS
+(SELECT
+	o.seller_id,
+	o.order_status,
+	COUNT(*)
+FROM orders as o
+JOIN
+top_sellers as ts
+ON ts.seller_id = o.seller_id
+GROUP BY 1,2 
+)
+
+SELECT * FROM sellers_reports
+
 /*
 12. Product Profit Margin
 Calculate the profit margin for each product (difference between price and cost of goods sold).
 Challenge: Rank products by their profit margin, showing highest to lowest.
 */
 
+SELECT
+	product_id,
+	product_name,
+	profit_margin,
+	DENSE_RANK() OVER (ORDER BY profit_margin DESC) as product_ranking
+FROM
+(SELECT
+	p.product_id,
+	p.product_name,
+	SUM(total_sales - (p.cogs * oi.quantity))/SUM(total_sales) * 100 as profit_margin
+FROM order_items as oi
+JOIN
+products as p
+on oi.product_id = p.product_id
+GROUP BY 1, 2
+) as t1
 
 /*
 13. Most Returned Products
@@ -274,7 +303,20 @@ Query the top 10 products by the number of returns.
 Challenge: Display the return rate as a percentage of total units sold for each product.
 */
 
-
+SELECT
+ p.product_id,
+ p.product_name,
+ COUNT(*) as total_unit_sold,
+ SUM(CASE WHEN o.order_status = 'Returned' THEN 1 ELSE 0 END) as total_returned,
+ SUM(CASE WHEN o.order_status = 'Returned' THEN 1 ELSE 0 END)::numeric/COUNT(*)::NUMERIC * 100 as return_percentage
+FROM order_items as oi
+JOIN
+products as p
+ON oi.product_id = p.product_id
+JOIN orders as o
+ON o.order_id = oi.order_id
+GROUP BY 1,2
+ORDER BY 5 DESC
 
 /*
 14. Orders Pending Shipment
@@ -288,6 +330,24 @@ Challenge: Include order details, payment date, and customer information.
 Identify sellers who haven’t made any sales in the last 6 months.
 Challenge: Show the last sale date and total sales from those sellers.
 */
+
+WITH cte1
+AS
+(SELECT * FROM SELLERS
+WHERE seller_id NOT IN (SELECT seller_id FROM orders WHERE order_date>= CURRENT_DATE - INTERVAL '6 month')
+)
+
+SELECT
+	o.seller_id,
+	MAX(o.order_date) as last_sale_date,
+	MAX(oi.total_sales) as last_sale_amount
+FROM orders as o
+JOIN
+cte1
+ON cte1.seller_id = o.seller_id
+JOIN order_items as oi
+ON o.order_id = oi.order_id
+GROUP BY 1
 
 /*
 16. IDENTITY customers into returning or new
